@@ -1,0 +1,82 @@
+name: Build Module
+
+on:
+  workflow_call:
+    inputs:
+      module_name:
+        description: "Module repository name"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on:
+      - self-hosted
+      - summary
+      - module
+
+    steps:
+
+      - name: Checkout module repository
+        uses: actions/checkout@v4
+
+      - name: Sync module to Core.Modules
+        shell: powershell
+        run: |
+          $module = "${{ inputs.module_name }}"
+
+          $source = "${{ github.workspace }}"
+          $destination = "C:\Summary\src\Core.Modules\$module"
+
+          Write-Host "Module: $module"
+          Write-Host "Source: $source"
+          Write-Host "Destination: $destination"
+
+          if (Test-Path $destination) {
+              Remove-Item $destination -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path $destination -Force
+
+          Copy-Item "$source\*" $destination -Recurse -Force
+
+      - name: build module
+        shell: powershell
+        run: |
+          $module = "${{ inputs.module_name }}"
+          set-location "c:\summary\src\core.modules\$module"
+          dotnet build
+
+          $username = ".\administrator"
+          $password = "server-05"
+
+          $secure_password = convertto-securestring $password -asplaintext -force
+
+          $credential = new-object system.management.automation.pscredential(
+            $username,
+            $secure_password
+          )
+
+          new-psdrive `
+            -name "pa" `
+            -psprovider filesystem `
+            -root "\\server-05.local\pa.demo" `
+            -credential $credential `
+            -erroraction stop
+
+          rename-item "pa:\web.config" "_web.config" -force
+          
+          start-sleep -seconds 10
+
+          $source = "c:\summary\src\core.modules\$module\bin\debug\netcoreapp3.1"
+
+          get-childitem "$source\*" -file -include *.dll |
+            copy-item -destination "pa:\" -force
+
+          rename-item "pa:\_web.config" "web.config" -force
+
+          remove-psdrive "pa"
